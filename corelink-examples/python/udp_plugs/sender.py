@@ -2,40 +2,36 @@ import time
 import numpy as np
 import sys
 import corelink
+from corelink_client import connect
+import httpx
+import os
+from dotenv import load_dotenv 
 
-def generate_permutations(s):
-    if len(s) <= 1:
-        return [s]
-    permutations = []
-    
-    for i, char in enumerate(s):
-        remaining = s[:i] + s[i+1:]
-        
-        for perm in generate_permutations(remaining):
-            permutations.append(char + perm)
-    
-    return permutations
+load_dotenv()
+
+BACKEND_URL = os.getenv("BACKEND_URL")
 
 async def main():
-    """
-    1. connect
-    2. create sender 
-    3. send
-    """
-    await corelink.connect("Testuser", "Testpassword", "corelink.hpc.nyu.edu", "20012")
+    await connect()
     senderID = await corelink.create_sender("Holodeck", "udp", "testing")
-    print("sender ID is ",senderID)
+    print("sender ID is ", senderID)
+    
+    async with httpx.AsyncClient() as client:
+        await client.post(f"{BACKEND_URL}/register", json={
+            "stream_id": senderID,
+            "role": "sender",
+            "data_type": "testing"
+        })
+
     count = 0
-    myDataString = "hello"
-    perms = generate_permutations(myDataString)
+    perms = ['hello', 'corelink', 'world']
     while True:
-        actNum = np.random.randint(0, len(perms) - 1)
-        print("actNum is ", actNum, " and perms[actNum] is ", perms[actNum]) 
-        await corelink.send(senderID, perms[actNum], {"count": count})
-        count = count + 1
-        if (count > 10):
-            time.sleep(10)
-            count = 0
+        for _ in range(len(perms)):
+            actNum = np.random.randint(0, len(perms))
+            print("actNum is ", actNum, " and perms[actNum] is ", perms[actNum]) 
+            await corelink.send(senderID, perms[actNum], {"count": count})
+            count = count + 1
+        time.sleep(8)
 
 
 corelink.run(main())
