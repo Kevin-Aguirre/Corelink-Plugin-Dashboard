@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
 import tempfile
-import os 
+import os
 import subprocess
-import sys 
+import sys
 from plugin_template import PLUGIN_TEMPLATE
+import glob
 
 app = FastAPI()
 app.add_middleware(
@@ -16,8 +17,10 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+# registry: { stream_id: { role, data_type, status, in_receiver_id? } }
 registry = {}
 plugin_registered = asyncio.Event()
+pending_connections = {}  # { receiver_id: [sender_stream_ids] }
 
 @app.get("/streams")
 async def get_streams():
@@ -25,14 +28,14 @@ async def get_streams():
 
 @app.post("/register")
 async def register(payload: dict):
-    # should probably validate role and data type here? 
     stream_id = payload.get("stream_id")
     registry[stream_id] = {
-        "role":      payload.get("role"),
-        "data_type": payload.get("data_type"),
-        "status":    "active"
+        "role":           payload.get("role"),
+        "data_type":      payload.get("data_type"),
+        "status":         "active",
+        "in_receiver_id": payload.get("in_receiver_id")  # only plugins have this
     }
-    if payload.get("role") == "plugin_out":
+    if payload.get("role") == "plugin":
         plugin_registered.set()
     print(f"Registered: {registry}")
     return {"status": "registered", "stream_id": stream_id}
@@ -52,48 +55,56 @@ async def handle_event(payload: dict):
 
 @app.post("/plugin")
 async def spawn_plugin(payload: dict):
-    """
-    payload: {
-        "code": "async def process(data_bytes, header):\n    ..."
-    }
-    """
+    for f in glob.glob(os.path.join(os.getcwd(), "tmp*.py")):
+        os.remove(f)
+    """Spawn a plugin node — no auto-wiring."""
     code = payload.get("code")
     if not code:
         return {"error": "no code provided"}
 
-    # Write plugin to temp file
     plugin_code = PLUGIN_TEMPLATE.format(process_fn=code)
     tmp = tempfile.NamedTemporaryFile(
-        mode='w',
-        suffix='.py',
-        delete=False,
-        dir=os.getcwd()
+        mode='w', suffix='.py', delete=False, dir=os.getcwd()
     )
     tmp.write(plugin_code)
     tmp.close()
-    print(f"Spawning plugin from {tmp.name}")
 
-    # Reset event before spawning
     plugin_registered.clear()
+    subprocess.Popen([sys.executable, tmp.name], cwd=os.getcwd())
 
-    # Spawn plugin as subprocess
-    subprocess.Popen(
-        [sys.executable, tmp.name],
-        cwd=os.getcwd()
-    )
-
-    # Wait for plugin to register with backend (timeout 10s)
     try:
         await asyncio.wait_for(plugin_registered.wait(), timeout=10.0)
     except asyncio.TimeoutError:
         return {"error": "plugin failed to register within 10 seconds"}
 
-    # Find the plugin_out stream_id
-    plugin_id = next(
-        (k for k, v in registry.items() if v["role"] == "plugin_out"),
-        None
+    plugin = next(
+        {"stream_id": k, **v} for k, v in registry.items() if v["role"] == "plugin"
     )
-    return {"status": "ok", "plugin_stream_id": plugin_id}
+    return {"status": "ok", "plugin": plugin}
+
+@app.post("/connect")
+async def connect_nodes(payload: dict):
+    from_stream_id = payload.get("from_stream_id")
+    to_stream_id   = payload.get("to_stream_id")
+    to_entry = registry.get(to_stream_id)
+    if not to_entry:
+        return {"error": f"{to_stream_id} not in registry"}
+
+    receiver_id = to_entry.get("in_receiver_id") or to_stream_id
+    if receiver_id not in pending_connections:
+        pending_connections[receiver_id] = []
+    pending_connections[receiver_id].append(from_stream_id)
+
+    registry[from_stream_id]["connects_to"] = to_stream_id
+    registry[to_stream_id]["receives_from"] = from_stream_id
+
+    print(f"Pending connection: {from_stream_id} -> {receiver_id}")
+    return {"status": "pending", "from": from_stream_id, "to": receiver_id}
+
+@app.get("/connections/{receiver_id}")
+async def get_connections(receiver_id: int):
+    stream_ids = pending_connections.pop(receiver_id, [])
+    return {"stream_ids": stream_ids}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
