@@ -1,21 +1,19 @@
 import time
 import numpy as np
-import sys
 import corelink
-from corelink_client import connect
 import httpx
 import os
-from dotenv import load_dotenv 
-
+from corelink_client import connect
+from dotenv import load_dotenv
 load_dotenv()
 
-BACKEND_URL = os.getenv("BACKEND_URL")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 async def main():
     await connect()
     senderID = await corelink.create_sender("Holodeck", "udp", "testing")
-    print("sender ID is ", senderID)
-    
+    print(f"Sender ID: {senderID}")
+
     async with httpx.AsyncClient() as client:
         await client.post(f"{BACKEND_URL}/register", json={
             "stream_id": senderID,
@@ -28,10 +26,9 @@ async def main():
     while True:
         for _ in range(len(perms)):
             actNum = np.random.randint(0, len(perms))
-            print("actNum is ", actNum, " and perms[actNum] is ", perms[actNum]) 
+            print(f"Sending: {perms[actNum]}")
             await corelink.send(senderID, perms[actNum], {"count": count})
-            count = count + 1
+            count += 1
         time.sleep(8)
-
 
 corelink.run(main())
