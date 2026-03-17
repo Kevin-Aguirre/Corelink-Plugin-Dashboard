@@ -1,11 +1,43 @@
+import { useState, useCallback, useRef } from "react";
 import "reactflow/dist/style.css";
 import { SidebarItem } from "../components/SidebarItem";
-import { PluginEditor } from "../components/PluginEditor"
+import { PluginEditor } from "../components/PluginEditor";
 import { COLORS } from "../constants";
 
 export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDeployPlugin, showEditor, setShowEditor }) {
+  const [width, setWidth] = useState(260);
+  const widthRef = useRef(260);
+  const draggingRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleMouseDown = useCallback((e) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    setIsDragging(true);
+
+    const startX = e.clientX;
+    const startWidth = widthRef.current;
+
+    const onMouseMove = (e) => {
+      const delta = startX - e.clientX;  // ← flipped: drag left = wider
+      const newWidth = Math.min(600, Math.max(200, startWidth + delta));
+      widthRef.current = newWidth;
+      setWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      draggingRef.current = false;
+      setIsDragging(false);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, []);
+
   const sidebarStyle = {
-    width: "260px",
+    width: `${width}px`,
     flexShrink: 0,
     borderLeft: `0.5px solid ${COLORS.border}`,
     padding: "1.25rem",
@@ -14,7 +46,11 @@ export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDepl
     backgroundColor: COLORS.bg,
     height: "100%",
     overflowY: "hidden",
+    overflowX: "visible",  // ← allow handle to bleed left
+    position: "relative",
+    userSelect: isDragging ? "none" : "auto",
   };
+
   const tabs = ["senders", "plugins", "receivers"];
   const filtered = {
     senders:   streams.filter(s => s.role === "sender"),
@@ -22,19 +58,29 @@ export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDepl
     receivers: streams.filter(s => s.role === "receiver"),
   };
 
+  const resizeHandle = (
+  <div
+    onMouseDown={handleMouseDown}
+    style={{
+      position: "absolute",
+      left: "-5px",  // ← left edge
+      top: 0,
+      bottom: 0,
+      width: "10px",
+      cursor: "col-resize",
+      backgroundColor: isDragging ? COLORS.accent : "transparent",
+      transition: "background-color 0.15s",
+      zIndex: 100,
+    }}
+    onMouseEnter={e => e.currentTarget.style.backgroundColor = COLORS.borderHover}
+    onMouseLeave={e => { if (!draggingRef.current) e.currentTarget.style.backgroundColor = "transparent"; }}
+  />
+);
+
   if (showEditor) {
     return (
-      <div style={{
-        width: "260px",
-        flexShrink: 0,
-        borderLeft: `0.5px solid ${COLORS.border}`,
-        padding: "1.25rem",
-        display: "flex",
-        flexDirection: "column",
-        backgroundColor: COLORS.bg,
-        height: "100%",
-        overflowY: "hidden",
-    }}>
+      <div style={sidebarStyle}>
+        {resizeHandle}
         <PluginEditor onBack={() => setShowEditor(false)} onDeploy={onDeployPlugin} />
       </div>
     );
@@ -42,6 +88,8 @@ export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDepl
 
   return (
     <div style={sidebarStyle}>
+      {resizeHandle}
+
       <div style={{ display: "flex", gap: "4px", marginBottom: "1.25rem" }}>
         {tabs.map(t => (
           <button key={t} onClick={() => setTab(t)} style={{

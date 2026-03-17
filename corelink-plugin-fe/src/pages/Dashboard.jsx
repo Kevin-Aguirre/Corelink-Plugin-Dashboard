@@ -12,17 +12,62 @@ import { CorelinkNode } from "../components/CorelinkNode"
 import { Sidebar } from "../components/Sidebar"
 import { Topbar } from '../components/Topbar'
 
-
+const nodeTypes = { corelink: CorelinkNode };
 let nodeIdCounter = 0;
 
-export default function Dashboard() {
-  const nodeTypes = { corelink: CorelinkNode };
+const SAMPLE_NODES = [
+  {
+    id: "node-1",
+    type: "corelink",
+    position: { x: 80, y: 180 },
+    data: { name: "microphone input", type: "sender", stream_id: 12345 },
+  },
+  {
+    id: "node-2",
+    type: "corelink",
+    position: { x: 320, y: 180 },
+    data: { name: "uppercase plugin", type: "plugin", stream_id: 67890 },
+  },
+  {
+    id: "node-3",
+    type: "corelink",
+    position: { x: 560, y: 180 },
+    data: { name: "speaker output", type: "receiver", stream_id: 11223 },
+  },
+];
 
+const SAMPLE_EDGES = [
+  {
+    id: "e1-2",
+    source: "node-1",
+    target: "node-2",
+    animated: true,
+    style: { stroke: COLORS.accent, strokeWidth: 1.5, strokeDasharray: "4 3", cursor: "pointer" },
+  },
+  {
+    id: "e2-3",
+    source: "node-2",
+    target: "node-3",
+    animated: true,
+    style: { stroke: COLORS.accent, strokeWidth: 1.5, strokeDasharray: "4 3", cursor: "pointer" },
+  },
+];
+
+const SAMPLE_STREAMS = [
+  { stream_id: 12345, name: "microphone input", role: "sender", status: "active" },
+  { stream_id: 99001, name: "audio sender", role: "sender", status: "active" },
+  { stream_id: 67890, name: "uppercase plugin", role: "plugin", status: "active", in_receiver_id: 55000 },
+  { stream_id: 67891, name: "reverb plugin", role: "plugin", status: "active", in_receiver_id: 55001 },
+  { stream_id: 11223, name: "speaker output", role: "receiver", status: "active" },
+  { stream_id: 11224, name: "display output", role: "receiver", status: "active" },
+];
+
+export default function Dashboard() {
   const [tab, setTab] = useState("senders");
   const [showEditor, setShowEditor] = useState(false);
-  const [streams, setStreams] = useState([]);
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [streams, setStreams] = useState(SAMPLE_STREAMS);
+  const [nodes, setNodes, onNodesChange] = useNodesState(SAMPLE_NODES);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(SAMPLE_EDGES);
   const [deploying, setDeploying] = useState(false);
 
   // Poll streams from backend
@@ -37,7 +82,7 @@ export default function Dashboard() {
           role: info.role,
           ...info,
         }));
-        setStreams(list);
+        if (list.length > 0) setStreams(list);
       } catch (e) {}
     };
     fetch_();
@@ -45,7 +90,6 @@ export default function Dashboard() {
     return () => clearInterval(iv);
   }, []);
 
-  // Drag from sidebar
   const handleDragStart = (e, item) => {
     e.dataTransfer.setData("application/reactflow", JSON.stringify(item));
     e.dataTransfer.effectAllowed = "move";
@@ -57,27 +101,34 @@ export default function Dashboard() {
     if (!raw) return;
     const item = JSON.parse(raw);
     if (nodes.find(n => n.data.stream_id === item.stream_id)) return;
-
     const bounds = e.currentTarget.getBoundingClientRect();
     const position = { x: e.clientX - bounds.left - 80, y: e.clientY - bounds.top - 30 };
-
     setNodes(prev => [...prev, {
       id: `node-${++nodeIdCounter}`,
       type: "corelink",
       position,
       data: { name: item.name, type: item.role, stream_id: item.stream_id },
     }]);
-  }, [nodes, setNodes]);
+  }, [nodes, setNodes]);  // ← remove nodes from deps too
 
-  const onConnect = useCallback((params) => {
-    setEdges(prev => addEdge({
-      ...params,
-      style: { stroke: COLORS.accent, strokeWidth: 1.5, strokeDasharray: "4 3" },
-      animated: true,
-    }, prev));
+  const onEdgeClick = useCallback((e, edge) => {
+    e.stopPropagation();
+    setEdges(prev => prev.filter(ed => ed.id !== edge.id));
   }, [setEdges]);
 
-  // Deploy plugin
+  const onNodeDoubleClick = useCallback((e, node) => {
+    setNodes(prev => prev.filter(n => n.id !== node.id));
+    setEdges(prev => prev.filter(ed => ed.source !== node.id && ed.target !== node.id));
+  }, [setNodes, setEdges]);
+
+  const onConnect = useCallback((params) => {
+      setEdges(prev => addEdge({
+        ...params,
+        style: { stroke: COLORS.accent, strokeWidth: 1.5, strokeDasharray: "4 3", cursor: "pointer" },
+        animated: true,
+      }, prev));
+    }, [setEdges]);
+
   const handleDeployPlugin = async (code) => {
     try {
       const res = await fetch("http://localhost:8000/plugin", {
@@ -97,20 +148,19 @@ export default function Dashboard() {
     }
   };
 
-  // Deploy all edges
   const handleDeploy = async () => {
     setDeploying(true);
     try {
       for (const edge of edges) {
         const fromNode = nodes.find(n => n.id === edge.source);
-        const toNode   = nodes.find(n => n.id === edge.target);
+        const toNode = nodes.find(n => n.id === edge.target);
         if (!fromNode || !toNode) continue;
         await fetch("http://localhost:8000/connect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             from_stream_id: fromNode.data.stream_id,
-            to_stream_id:   toNode.data.stream_id,
+            to_stream_id: toNode.data.stream_id,
           }),
         });
       }
@@ -129,8 +179,10 @@ export default function Dashboard() {
       <Topbar onDeploy={handleDeploy} deploying={deploying} edgeCount={edges.length} />
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+        {/* Canvas — minWidth prevents it from being crushed by sidebar */}
         <div
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 0, position: "relative" }}
           onDrop={handleDrop}
           onDragOver={e => e.preventDefault()}
         >
@@ -139,18 +191,24 @@ export default function Dashboard() {
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onEdgeClick={onEdgeClick}
             onConnect={onConnect}
+            onNodeDoubleClick={onNodeDoubleClick}
             nodeTypes={nodeTypes}
             fitView
             style={{ backgroundColor: COLORS.bg }}
             proOptions={{ hideAttribution: true }}
           >
             <Background color={COLORS.border} gap={24} size={1} />
-            <Controls style={{
-              background: COLORS.surface,
-              border: `0.5px solid ${COLORS.border}`,
-              borderRadius: "8px",
-            }} />
+            <Controls
+              position="bottom-right"
+              style={{
+                background: COLORS.surface,
+                border: `0.5px solid ${COLORS.border}`,
+                borderRadius: "8px",
+                margin: "1rem",
+              }}
+            />
           </ReactFlow>
         </div>
 
