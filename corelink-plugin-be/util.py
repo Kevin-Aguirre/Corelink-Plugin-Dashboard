@@ -4,10 +4,12 @@ import os
 from dotenv import load_dotenv 
 load_dotenv()
 
+BACKEND_URL = os.getenv("BACKEND_URL")
+
 async def notify(event: str, data: dict, key: str):
     try:
         async with httpx.AsyncClient() as client:
-            await client.post(f"{os.getenv("BACKEND_URL")}/event", json={
+            await client.post(f"{BACKEND_URL}/event", json={
                 "event": event,
                 "data": data,
                 "key": key

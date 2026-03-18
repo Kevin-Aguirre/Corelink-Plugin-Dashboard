@@ -21,6 +21,8 @@ app.add_middleware(
 registry = {}
 plugin_registered = asyncio.Event()
 pending_connections = {}  # { receiver_id: [sender_stream_ids] }
+last_registered_plugin_id = None  # ← add this
+current_plugin_process = None  # add with other globals
 
 @app.get("/streams")
 async def get_streams():
@@ -28,14 +30,16 @@ async def get_streams():
 
 @app.post("/register")
 async def register(payload: dict):
+    global last_registered_plugin_id
     stream_id = payload.get("stream_id")
     registry[stream_id] = {
         "role":           payload.get("role"),
         "data_type":      payload.get("data_type"),
         "status":         "active",
-        "in_receiver_id": payload.get("in_receiver_id")  # only plugins have this
+        "in_receiver_id": payload.get("in_receiver_id")
     }
     if payload.get("role") == "plugin":
+        last_registered_plugin_id = stream_id  # ← add this
         plugin_registered.set()
     print(f"Registered: {registry}")
     return {"status": "registered", "stream_id": stream_id}
@@ -55,12 +59,31 @@ async def handle_event(payload: dict):
 
 @app.post("/plugin")
 async def spawn_plugin(payload: dict):
-    for f in glob.glob(os.path.join(os.getcwd(), "tmp*.py")):
-        os.remove(f)
-    """Spawn a plugin node — no auto-wiring."""
+    global last_registered_plugin_id, current_plugin_process
     code = payload.get("code")
     if not code:
         return {"error": "no code provided"}
+
+    # Kill old plugin process
+    if current_plugin_process is not None:
+        try:
+            current_plugin_process.kill()
+            current_plugin_process.wait()
+        except Exception as e:
+            print(f"Failed to kill old plugin: {e}")
+        current_plugin_process = None
+
+    # Remove old plugins from registry
+    old_plugin_ids = [k for k, v in registry.items() if v["role"] == "plugin"]
+    for pid in old_plugin_ids:
+        del registry[pid]
+
+    # Clean up old tmp files
+    for f in glob.glob(os.path.join(os.getcwd(), "tmp*.py")):
+        try:
+            os.remove(f)
+        except:
+            pass
 
     plugin_code = PLUGIN_TEMPLATE.format(process_fn=code)
     tmp = tempfile.NamedTemporaryFile(
@@ -70,17 +93,28 @@ async def spawn_plugin(payload: dict):
     tmp.close()
 
     plugin_registered.clear()
-    subprocess.Popen([sys.executable, tmp.name], cwd=os.getcwd())
+    last_registered_plugin_id = None
+
+    env = os.environ.copy()
+    env["CORELINK_USERNAME"] = os.getenv("CORELINK_USERNAME", "Testuser")
+    env["CORELINK_PASSWORD"] = os.getenv("CORELINK_PASSWORD", "Testpassword")
+    env["CORELINK_SERVER_HOST"] = os.getenv("CORELINK_SERVER_HOST", "corelink.hpc.nyu.edu")
+    env["CORELINK_SERVER_PORT"] = os.getenv("CORELINK_SERVER_PORT", "20012")
+    env["BACKEND_URL"] = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+    current_plugin_process = subprocess.Popen(
+        [sys.executable, tmp.name],
+        cwd=os.getcwd(),
+        env=env
+    )
 
     try:
         await asyncio.wait_for(plugin_registered.wait(), timeout=10.0)
     except asyncio.TimeoutError:
         return {"error": "plugin failed to register within 10 seconds"}
 
-    plugin = next(
-        {"stream_id": k, **v} for k, v in registry.items() if v["role"] == "plugin"
-    )
-    return {"status": "ok", "plugin": plugin}
+    plugin_id = last_registered_plugin_id
+    return {"status": "ok", "plugin": {"stream_id": plugin_id, **registry[plugin_id]}}
 
 @app.post("/connect")
 async def connect_nodes(payload: dict):
@@ -100,6 +134,11 @@ async def connect_nodes(payload: dict):
 
     print(f"Pending connection: {from_stream_id} -> {receiver_id}")
     return {"status": "pending", "from": from_stream_id, "to": receiver_id}
+
+@app.post("/reset-connections/{receiver_id}")
+async def reset_connections(receiver_id: int):
+    pending_connections.pop(receiver_id, None)
+    return {"status": "ok"}
 
 @app.get("/connections/{receiver_id}")
 async def get_connections(receiver_id: int):

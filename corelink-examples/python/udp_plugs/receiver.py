@@ -23,15 +23,18 @@ async def byte_to_string(data_bytes, stream_id, header):
 async def poll_connections(my_receiver_id):
     global connected_streams
     while True:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{BACKEND_URL}/connections/{my_receiver_id}")
-            stream_ids = response.json().get("stream_ids", [])
-            for sid in stream_ids:
-                await control.subscribe_to_stream(my_receiver_id, sid)
-                if connected_streams is None:
-                    connected_streams = set()
-                connected_streams.add(sid)
-                print(f"Connected to stream {sid}")
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{BACKEND_URL}/connections/{my_receiver_id}")
+                stream_ids = response.json().get("stream_ids", [])
+                for sid in stream_ids:
+                    await control.subscribe_to_stream(my_receiver_id, sid)
+                    if connected_streams is None:
+                        connected_streams = set()
+                    connected_streams.add(sid)
+                    print(f"Connected to stream {sid}")
+        except Exception as e:
+            print(f"Poll error: {e}")
         await asyncio.sleep(2)
 
 async def main():

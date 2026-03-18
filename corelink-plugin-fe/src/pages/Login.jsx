@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { SERVER_HOST } from "../constants";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -23,7 +24,7 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/auth", {
+      const res = await fetch(`${SERVER_HOST}/auth`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -38,7 +39,7 @@ export default function Login() {
         setError(data.error || "Authentication failed.");
       }
     } catch (e) {
-      setError("Could not reach backend at localhost:8000");
+      setError("Could not reach backend.");
     }
     setLoading(false);
   };

@@ -7,7 +7,7 @@ import ReactFlow, {
   useEdgesState
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { COLORS } from "../constants"
+import { SERVER_HOST, COLORS } from "../constants"
 import { CorelinkNode } from "../components/CorelinkNode"
 import { Sidebar } from "../components/Sidebar"
 import { Topbar } from '../components/Topbar'
@@ -15,66 +15,18 @@ import { Topbar } from '../components/Topbar'
 const nodeTypes = { corelink: CorelinkNode };
 let nodeIdCounter = 0;
 
-const SAMPLE_NODES = [
-  {
-    id: "node-1",
-    type: "corelink",
-    position: { x: 80, y: 180 },
-    data: { name: "microphone input", type: "sender", stream_id: 12345 },
-  },
-  {
-    id: "node-2",
-    type: "corelink",
-    position: { x: 320, y: 180 },
-    data: { name: "uppercase plugin", type: "plugin", stream_id: 67890 },
-  },
-  {
-    id: "node-3",
-    type: "corelink",
-    position: { x: 560, y: 180 },
-    data: { name: "speaker output", type: "receiver", stream_id: 11223 },
-  },
-];
-
-const SAMPLE_EDGES = [
-  {
-    id: "e1-2",
-    source: "node-1",
-    target: "node-2",
-    animated: true,
-    style: { stroke: COLORS.accent, strokeWidth: 1.5, strokeDasharray: "4 3", cursor: "pointer" },
-  },
-  {
-    id: "e2-3",
-    source: "node-2",
-    target: "node-3",
-    animated: true,
-    style: { stroke: COLORS.accent, strokeWidth: 1.5, strokeDasharray: "4 3", cursor: "pointer" },
-  },
-];
-
-const SAMPLE_STREAMS = [
-  { stream_id: 12345, name: "microphone input", role: "sender", status: "active" },
-  { stream_id: 99001, name: "audio sender", role: "sender", status: "active" },
-  { stream_id: 67890, name: "uppercase plugin", role: "plugin", status: "active", in_receiver_id: 55000 },
-  { stream_id: 67891, name: "reverb plugin", role: "plugin", status: "active", in_receiver_id: 55001 },
-  { stream_id: 11223, name: "speaker output", role: "receiver", status: "active" },
-  { stream_id: 11224, name: "display output", role: "receiver", status: "active" },
-];
-
 export default function Dashboard() {
   const [tab, setTab] = useState("senders");
   const [showEditor, setShowEditor] = useState(false);
-  const [streams, setStreams] = useState(SAMPLE_STREAMS);
-  const [nodes, setNodes, onNodesChange] = useNodesState(SAMPLE_NODES);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(SAMPLE_EDGES);
+  const [streams, setStreams] = useState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [deploying, setDeploying] = useState(false);
 
-  // Poll streams from backend
   useEffect(() => {
     const fetch_ = async () => {
       try {
-        const res = await fetch("http://localhost:8000/streams");
+        const res = await fetch(`${SERVER_HOST}/streams`);
         const data = await res.json();
         const list = Object.entries(data).map(([id, info]) => ({
           stream_id: parseInt(id),
@@ -131,13 +83,30 @@ export default function Dashboard() {
 
   const handleDeployPlugin = async (code) => {
     try {
-      const res = await fetch("http://localhost:8000/plugin", {
+      const res = await fetch(`${SERVER_HOST}/plugin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
+
       const data = await res.json();
       if (data.status === "ok") {
+        // Reset connections for all receiver nodes on canvas
+        const receiverNodes = nodes.filter(n => n.data.type === "receiver");
+        for (const rn of receiverNodes) {
+          await fetch(`${SERVER_HOST}/reset-connections/${rn.data.stream_id}`, {
+            method: "POST",
+          });
+        }
+
+        // Update the plugin node on canvas with new stream_id
+        const newPluginId = data.plugin.stream_id;
+        setNodes(prev => prev.map(n =>
+          n.data.type === "plugin"
+            ? { ...n, data: { ...n.data, stream_id: newPluginId, name: `plugin ${newPluginId}` } }
+            : n
+        ));
+
         setShowEditor(false);
         setTab("plugins");
       } else {
@@ -155,7 +124,7 @@ export default function Dashboard() {
         const fromNode = nodes.find(n => n.id === edge.source);
         const toNode = nodes.find(n => n.id === edge.target);
         if (!fromNode || !toNode) continue;
-        await fetch("http://localhost:8000/connect", {
+        await fetch(`${SERVER_HOST}/connect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -179,8 +148,6 @@ export default function Dashboard() {
       <Topbar onDeploy={handleDeploy} deploying={deploying} edgeCount={edges.length} />
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-
-        {/* Canvas — minWidth prevents it from being crushed by sidebar */}
         <div
           style={{ flex: 1, minWidth: 0, position: "relative" }}
           onDrop={handleDrop}

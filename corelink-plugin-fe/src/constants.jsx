@@ -1,3 +1,5 @@
+export const SERVER_HOST = "http://localhost:8000"
+
 export const COLORS = {
   bg: "#0f0f0e",
   surface: "#1a1a18",

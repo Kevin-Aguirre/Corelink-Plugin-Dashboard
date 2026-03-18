@@ -19,7 +19,7 @@ export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDepl
     const startWidth = widthRef.current;
 
     const onMouseMove = (e) => {
-      const delta = startX - e.clientX;  // ← flipped: drag left = wider
+      const delta = startX - e.clientX; 
       const newWidth = Math.min(600, Math.max(200, startWidth + delta));
       widthRef.current = newWidth;
       setWidth(newWidth);
