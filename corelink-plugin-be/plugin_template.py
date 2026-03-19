@@ -11,17 +11,23 @@ load_dotenv()
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 out_sender_id = None
+allowed_streams = set()
 
 {process_fn}
 
 async def poll_connections(my_receiver_id):
+    global allowed_streams
     while True:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{{BACKEND_URL}}/connections/{{my_receiver_id}}")
-            stream_ids = response.json().get("stream_ids", [])
-            for sid in stream_ids:
-                await control.subscribe_to_stream(my_receiver_id, sid)
-                print(f"Plugin connected to stream {{sid}}")
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{{BACKEND_URL}}/connections/{{my_receiver_id}}")
+                stream_ids = response.json().get("stream_ids", [])
+                for sid in stream_ids:
+                    await control.subscribe_to_stream(my_receiver_id, sid)
+                    allowed_streams.add(sid)
+                    print(f"Plugin connected to stream {{sid}}")
+        except Exception as e:
+            print(f"Poll error: {{e}}")
         await asyncio.sleep(2)
 
 async def main():
@@ -31,8 +37,8 @@ async def main():
     out_sender_id = await corelink.create_sender("Holodeck", "udp", "processed-data")
 
     async def data_callback(data_bytes, streamID, header):
-        global out_sender_id
-        if streamID == out_sender_id:
+        global out_sender_id, allowed_streams
+        if allowed_streams and streamID not in allowed_streams:
             return
         result = await process(data_bytes, header)
         await corelink.send(out_sender_id, result, header)
@@ -45,7 +51,7 @@ async def main():
         data_type="testing",
         alert=True,
         echo=True,
-        subscribe=True
+        subscribe=False
     )
     await processing.connect_receiver(in_receiver_id)
 
@@ -54,7 +60,8 @@ async def main():
             "stream_id": out_sender_id,
             "in_receiver_id": in_receiver_id,
             "role": "plugin",
-            "data_type": "processed-data"
+            "data_type": "processed-data",
+            "name": "{plugin_name}"
         }})
 
     asyncio.create_task(poll_connections(in_receiver_id))

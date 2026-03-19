@@ -11,10 +11,11 @@ export function PluginEditor({ onBack, onDeploy }) {
     `);
     const [language, setLanguage] = useState("python");
     const [deploying, setDeploying] = useState(false);
+    const [pluginName, setPluginName] = useState(`plugin_${Date.now()}`);
 
     const handleDeploy = async () => {
         setDeploying(true);
-        await onDeploy(code, language);
+        await onDeploy(code, pluginName);
         setDeploying(false);
     };
 
@@ -45,7 +46,19 @@ export function PluginEditor({ onBack, onDeploy }) {
         }}>
             NEW PLUGIN
         </div>
-
+        <input
+            value={pluginName}
+            onChange={e => setPluginName(e.target.value)}
+            placeholder="plugin name"
+            style={{
+                width: "100%", height: "34px", marginBottom: "8px",
+                padding: "0 12px", fontSize: "12px",
+                fontFamily: "'IBM Plex Mono', monospace",
+                background: COLORS.surface,
+                border: `0.5px solid ${COLORS.border}`,
+                borderRadius: "8px", color: COLORS.text, outline: "none",
+            }}
+        />
         <textarea
             value={code}
             onChange={e => setCode(e.target.value)}

@@ -19,6 +19,7 @@ app.add_middleware(
 
 # registry: { stream_id: { role, data_type, status, in_receiver_id? } }
 registry = {}
+plugin_processes = {} 
 plugin_registered = asyncio.Event()
 pending_connections = {}  # { receiver_id: [sender_stream_ids] }
 last_registered_plugin_id = None  # ← add this
@@ -57,35 +58,35 @@ async def handle_event(payload: dict):
     print(f"Event [{event}]: {registry}")
     return {"status": "ok"}
 
+
 @app.post("/plugin")
 async def spawn_plugin(payload: dict):
-    global last_registered_plugin_id, current_plugin_process
+    global last_registered_plugin_id
     code = payload.get("code")
+    name = payload.get("name", f"plugin_{len(plugin_processes)}")
     if not code:
         return {"error": "no code provided"}
 
-    # Kill old plugin process
-    if current_plugin_process is not None:
+    # Kill existing process with same name if redeploying
+    if name in plugin_processes:
         try:
-            current_plugin_process.kill()
-            current_plugin_process.wait()
+            plugin_processes[name].kill()
+            plugin_processes[name].wait()
         except Exception as e:
-            print(f"Failed to kill old plugin: {e}")
-        current_plugin_process = None
+            print(f"Failed to kill old plugin {name}: {e}")
+        # Remove old registry entry for this name
+        old_ids = [k for k, v in registry.items() if v.get("name") == name]
+        for pid in old_ids:
+            del registry[pid]
 
-    # Remove old plugins from registry
-    old_plugin_ids = [k for k, v in registry.items() if v["role"] == "plugin"]
-    for pid in old_plugin_ids:
-        del registry[pid]
-
-    # Clean up old tmp files
+    # Clean up tmp files for this plugin name
     for f in glob.glob(os.path.join(os.getcwd(), "tmp*.py")):
         try:
             os.remove(f)
         except:
             pass
 
-    plugin_code = PLUGIN_TEMPLATE.format(process_fn=code)
+    plugin_code = PLUGIN_TEMPLATE.format(process_fn=code, plugin_name=name)
     tmp = tempfile.NamedTemporaryFile(
         mode='w', suffix='.py', delete=False, dir=os.getcwd()
     )
@@ -102,7 +103,7 @@ async def spawn_plugin(payload: dict):
     env["CORELINK_SERVER_PORT"] = os.getenv("CORELINK_SERVER_PORT", "20012")
     env["BACKEND_URL"] = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-    current_plugin_process = subprocess.Popen(
+    plugin_processes[name] = subprocess.Popen(
         [sys.executable, tmp.name],
         cwd=os.getcwd(),
         env=env
