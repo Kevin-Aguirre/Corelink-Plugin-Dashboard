@@ -82,12 +82,12 @@ export default function Dashboard() {
       }, prev));
     }, [setEdges]);
 
-  const handleDeployPlugin = async (code, name) => {
+  const handleDeployPlugin = async (code, name, language = "python") => {
     try {
       const res = await fetch(`${SERVER_HOST}/api/plugin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, name }),
+        body: JSON.stringify({ code, name, language }),
       });
 
       const data = await res.json();
