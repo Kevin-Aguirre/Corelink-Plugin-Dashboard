@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { SERVER_HOST } from "../constants";
 
 export default function Login() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
     username: "Testuser",
     password: "Testpassword",
-    host: "corelink.hpc.nyu.edu",
+    host: "localhost",
     port: "20012",
     workspace: "Holodeck",
   });
@@ -24,22 +23,23 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${SERVER_HOST}/auth`, {
+      const serverUrl = `http://${form.host}:20015`;
+      const res = await fetch(`${serverUrl}/api/auth`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          port: parseInt(form.port),
-        }),
+        body: JSON.stringify({ username: form.username, password: form.password }),
       });
       const data = await res.json();
       if (res.ok && data.status === "ok") {
+        sessionStorage.setItem("cl_server", serverUrl);
+        sessionStorage.setItem("cl_workspace", form.workspace);
+        if (data.token) sessionStorage.setItem("cl_token", data.token);
         navigate("/dashboard");
       } else {
         setError(data.error || "Authentication failed.");
       }
     } catch (e) {
-      setError("Could not reach backend.");
+      setError(`Could not reach server at http://${form.host}:20015 — is the corelink server running?`);
     }
     setLoading(false);
   };

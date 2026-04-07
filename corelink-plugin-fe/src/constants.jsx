@@ -1,3 +1,7 @@
+export const getServerHost = () => {
+  try { return sessionStorage.getItem('cl_server') || 'http://localhost:20015' } catch { return 'http://localhost:20015' }
+}
+
 export const SERVER_HOST = "http://localhost:8000"
 
 export const COLORS = {

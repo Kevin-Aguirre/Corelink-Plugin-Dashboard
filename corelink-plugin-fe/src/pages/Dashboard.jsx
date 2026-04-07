@@ -7,7 +7,7 @@ import ReactFlow, {
   useEdgesState
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { SERVER_HOST, COLORS } from "../constants"
+import { getServerHost, COLORS } from "../constants"
 import { CorelinkNode } from "../components/CorelinkNode"
 import { Sidebar } from "../components/Sidebar"
 import { Topbar } from '../components/Topbar'
@@ -16,6 +16,7 @@ const nodeTypes = { corelink: CorelinkNode };
 let nodeIdCounter = 0;
 
 export default function Dashboard() {
+  const SERVER_HOST = getServerHost();
   const [tab, setTab] = useState("senders");
   const [showEditor, setShowEditor] = useState(false);
   const [streams, setStreams] = useState([]);
@@ -26,7 +27,7 @@ export default function Dashboard() {
   useEffect(() => {
     const fetch_ = async () => {
       try {
-        const res = await fetch(`${SERVER_HOST}/streams`);
+        const res = await fetch(`${SERVER_HOST}/api/streams`);
         const data = await res.json();
         const list = Object.entries(data).map(([id, info]) => ({
           stream_id: parseInt(id),
@@ -83,7 +84,7 @@ export default function Dashboard() {
 
   const handleDeployPlugin = async (code, name) => {
     try {
-      const res = await fetch(`${SERVER_HOST}/plugin`, {
+      const res = await fetch(`${SERVER_HOST}/api/plugin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, name }),
@@ -94,7 +95,7 @@ export default function Dashboard() {
         // Reset connections for all receiver nodes on canvas
         const receiverNodes = nodes.filter(n => n.data.type === "receiver");
         for (const rn of receiverNodes) {
-          await fetch(`${SERVER_HOST}/reset-connections/${rn.data.stream_id}`, {
+          await fetch(`${SERVER_HOST}/api/reset-connections/${rn.data.stream_id}`, {
             method: "POST",
           });
         }
@@ -124,7 +125,7 @@ export default function Dashboard() {
         const fromNode = nodes.find(n => n.id === edge.source);
         const toNode = nodes.find(n => n.id === edge.target);
         if (!fromNode || !toNode) continue;
-        await fetch(`${SERVER_HOST}/connect`, {
+        await fetch(`${SERVER_HOST}/api/connect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

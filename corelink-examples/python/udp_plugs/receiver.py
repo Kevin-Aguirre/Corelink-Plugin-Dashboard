@@ -1,64 +1,80 @@
 import corelink
 from corelink import processing
+from corelink.resources import reqs, variables
+import asyncio
 import httpx
 import os
-from corelink_client import connect
 from dotenv import load_dotenv
-import asyncio
-from corelink.resources import control
 load_dotenv()
 
-BACKEND_URL = os.getenv("BACKEND_URL")
-connected_streams = None
+CORELINK_USERNAME    = os.getenv("CORELINK_USERNAME",    "Testuser")
+CORELINK_PASSWORD    = os.getenv("CORELINK_PASSWORD",    "Testpassword")
+CORELINK_SERVER_HOST = os.getenv("CORELINK_SERVER_HOST", "localhost")
+CORELINK_SERVER_PORT = int(os.getenv("CORELINK_SERVER_PORT", "20012"))
+BACKEND_URL          = os.getenv("BACKEND_URL",          "http://localhost:20015")
 
-async def byte_to_string(data_bytes, stream_id, header):
-    if connected_streams is None or stream_id not in connected_streams:
-        return
+receiver_id = None
+
+async def on_data(data_bytes, stream_id, header):
     try:
-        word = data_bytes.decode('utf-8')
-        print(f"RECEIVED: {word} | Count: {header.get('count', 'N/A')}")
+        print(f"RECEIVED: {data_bytes.decode('utf-8')} | Count: {header.get('count', 'N/A')}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Decode error: {e}")
+
+async def on_update(message, key):    pass
+async def on_stale(message, key):     pass
+async def on_subscriber(message, key): pass
+async def on_dropped(message, key):   pass
 
 async def poll_connections(my_receiver_id):
-    global connected_streams
+    """Poll the corelink server for dashboard-driven stream connections."""
     while True:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(f"{BACKEND_URL}/connections/{my_receiver_id}")
+                response = await client.get(f"{BACKEND_URL}/api/connections/{my_receiver_id}")
                 stream_ids = response.json().get("stream_ids", [])
                 for sid in stream_ids:
-                    await control.subscribe_to_stream(my_receiver_id, sid)
-                    if connected_streams is None:
-                        connected_streams = set()
-                    connected_streams.add(sid)
+                    await reqs.request_func({
+                        "function": "subscribe",
+                        "receiverID": my_receiver_id,
+                        "streamIDs": [sid],
+                        "token": variables.token
+                    })
                     print(f"Connected to stream {sid}")
         except Exception as e:
             print(f"Poll error: {e}")
         await asyncio.sleep(2)
 
 async def main():
-    await connect()
-    await corelink.set_data_callback(byte_to_string)
+    global receiver_id
 
-    streamID = await corelink.create_receiver(
-        "Holodeck", "udp", "processed-data",
-        alert=True,
-        echo=True,
-        subscribe=True  # no auto-wiring
+    await corelink.connect(
+        CORELINK_USERNAME,
+        CORELINK_PASSWORD,
+        CORELINK_SERVER_HOST,
+        CORELINK_SERVER_PORT,
     )
-    await processing.connect_receiver(streamID)
+    await corelink.set_server_callback(on_update,      'update')
+    await corelink.set_server_callback(on_stale,       'stale')
+    await corelink.set_server_callback(on_subscriber,  'subscriber')
+    await corelink.set_server_callback(on_dropped,     'dropped')
 
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BACKEND_URL}/register", json={
-            "stream_id": streamID,
-            "role": "receiver",
-            "data_type": "processed-data"
-        })
+    await corelink.set_data_callback(on_data)
 
-    asyncio.create_task(poll_connections(streamID))
+    # subscribe=False — connections are made explicitly via the dashboard
+    receiver_id = await corelink.create_receiver(
+        workspace="Holodeck",
+        protocol="udp",
+        data_type="",
+        alert=False,
+        echo=False,
+        subscribe=False,
+    )
+    await processing.connect_receiver(receiver_id)
 
-    print(f"Receiver ready. streamID: {streamID}")
-    await corelink.asyncio.sleep(10000)
+    asyncio.create_task(poll_connections(receiver_id))
+
+    print(f"Receiver ready. ID: {receiver_id}. Draw connections on the dashboard to wire streams.")
+    await corelink.asyncio.sleep(100000)
 
 corelink.run(main())
