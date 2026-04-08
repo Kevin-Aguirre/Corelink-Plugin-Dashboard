@@ -17,14 +17,13 @@ const BOILERPLATE = {
 }
 `,
 
-  cpp: `// Signature required by the Corelink C++ plugin runner.
-// Build: see plugin-runner/clients/cpp/Dockerfile
-#include <vector>
+  cpp: `#include <vector>
 #include <cstdint>
 #include <string>
 #include <algorithm>
 #include <nlohmann/json.hpp>
 
+// header is a nlohmann::json object (may be empty)
 std::vector<uint8_t> process(const uint8_t* data, size_t len,
                               const nlohmann::json& header) {
     std::string word(reinterpret_cast<const char*>(data), len);
@@ -60,7 +59,6 @@ const DOCKER_REQUIRED = new Set(["cpp", "csharp"]);
 export function PluginEditor({ onBack, onDeploy }) {
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState(BOILERPLATE.python);
-  const [deploying, setDeploying] = useState(false);
   const [pluginName, setPluginName] = useState(`plugin_${Date.now()}`);
 
   const handleLanguageChange = (lang) => {
@@ -68,10 +66,8 @@ export function PluginEditor({ onBack, onDeploy }) {
     setCode(BOILERPLATE[lang]);
   };
 
-  const handleDeploy = async () => {
-    setDeploying(true);
-    await onDeploy(code, pluginName, language);
-    setDeploying(false);
+  const handleDeploy = () => {
+    onDeploy(code, pluginName, language);
   };
 
   const dockerRequired = DOCKER_REQUIRED.has(language);
@@ -167,18 +163,17 @@ export function PluginEditor({ onBack, onDeploy }) {
 
       <button
         onClick={handleDeploy}
-        disabled={deploying}
         style={{
           width: "100%", height: "38px",
-          background: deploying ? COLORS.surface : COLORS.accent,
+          background: COLORS.accent,
           border: "none", borderRadius: "8px",
-          color: deploying ? COLORS.textMuted : "#fff",
+          color: "#fff",
           fontSize: "13px", fontWeight: 500,
           fontFamily: "'IBM Plex Sans', sans-serif",
-          cursor: deploying ? "not-allowed" : "pointer",
+          cursor: "pointer",
         }}
       >
-        {deploying ? "deploying..." : `deploy ${LANGUAGE_LABELS[language].toLowerCase()} plugin`}
+        add to canvas
       </button>
     </div>
   );

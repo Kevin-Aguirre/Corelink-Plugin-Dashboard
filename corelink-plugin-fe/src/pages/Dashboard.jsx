@@ -69,10 +69,13 @@ export default function Dashboard() {
     setEdges(prev => prev.filter(ed => ed.id !== edge.id));
   }, [setEdges]);
 
-  const onNodeDoubleClick = useCallback((e, node) => {
+  const onNodeDoubleClick = useCallback(async (e, node) => {
+    if (node.data.type === "plugin" && node.data.stream_id) {
+      await fetch(`${SERVER_HOST}/api/plugin/${node.data.stream_id}`, { method: "DELETE" });
+    }
     setNodes(prev => prev.filter(n => n.id !== node.id));
     setEdges(prev => prev.filter(ed => ed.source !== node.id && ed.target !== node.id));
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, SERVER_HOST]);
 
   const onConnect = useCallback((params) => {
       setEdges(prev => addEdge({
@@ -82,56 +85,64 @@ export default function Dashboard() {
       }, prev));
     }, [setEdges]);
 
-  const handleDeployPlugin = async (code, name, language = "python") => {
-    try {
-      const res = await fetch(`${SERVER_HOST}/api/plugin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, name, language }),
-      });
-
-      const data = await res.json();
-      if (data.status === "ok") {
-        // Reset connections for all receiver nodes on canvas
-        const receiverNodes = nodes.filter(n => n.data.type === "receiver");
-        for (const rn of receiverNodes) {
-          await fetch(`${SERVER_HOST}/api/reset-connections/${rn.data.stream_id}`, {
-            method: "POST",
-          });
-        }
-
-        // Update the plugin node on canvas with new stream_id
-        const newPluginId = data.plugin.stream_id;
-        setNodes(prev => prev.map(n =>
-          n.data.type === "plugin"
-            ? { ...n, data: { ...n.data, stream_id: newPluginId, name: `plugin ${newPluginId}` } }
-            : n
-        ));
-
-        setShowEditor(false);
-        setTab("plugins");
-      } else {
-        alert(data.error || "Deploy failed");
-      }
-    } catch (e) {
-      alert("Could not reach backend");
-    }
+  const handleAddPluginToCanvas = (code, name, language) => {
+    setNodes(prev => [...prev, {
+      id: `node-${++nodeIdCounter}`,
+      type: "corelink",
+      position: { x: 200 + prev.filter(n => n.data.type === "plugin").length * 60, y: 150 },
+      data: { name, type: "plugin", code, language, stream_id: null },
+    }]);
+    setShowEditor(false);
+    setTab("plugins");
   };
 
   const handleDeploy = async () => {
     setDeploying(true);
     try {
+      // Reset pending connections for all receivers on canvas
+      for (const rn of nodes.filter(n => n.data.type === "receiver" && n.data.stream_id)) {
+        await fetch(`${SERVER_HOST}/api/reset-connections/${rn.data.stream_id}`, { method: "POST" });
+      }
+
+      // Spawn plugin nodes that haven't been deployed yet (no stream_id)
+      const nodeStreamIds = {}; // node.id → newly assigned stream_id
+      for (const node of nodes.filter(n => n.data.type === "plugin" && !n.data.stream_id)) {
+        const res = await fetch(`${SERVER_HOST}/api/plugin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: node.data.code, name: node.data.name, language: node.data.language }),
+        });
+        const data = await res.json();
+        if (data.status === "ok") {
+          nodeStreamIds[node.id] = data.plugin.stream_id;
+        } else {
+          alert(data.error || `Failed to deploy plugin ${node.data.name}`);
+          setDeploying(false);
+          return;
+        }
+      }
+
+      // Update canvas nodes with newly assigned stream_ids
+      if (Object.keys(nodeStreamIds).length > 0) {
+        setNodes(prev => prev.map(n =>
+          nodeStreamIds[n.id]
+            ? { ...n, data: { ...n.data, stream_id: nodeStreamIds[n.id] } }
+            : n
+        ));
+      }
+
+      // Queue connections for all edges
+      const getStreamId = (nodeId) => {
+        return nodeStreamIds[nodeId] || nodes.find(n => n.id === nodeId)?.data.stream_id;
+      };
       for (const edge of edges) {
-        const fromNode = nodes.find(n => n.id === edge.source);
-        const toNode = nodes.find(n => n.id === edge.target);
-        if (!fromNode || !toNode) continue;
+        const fromId = getStreamId(edge.source);
+        const toId = getStreamId(edge.target);
+        if (!fromId || !toId) continue;
         await fetch(`${SERVER_HOST}/api/connect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            from_stream_id: fromNode.data.stream_id,
-            to_stream_id: toNode.data.stream_id,
-          }),
+          body: JSON.stringify({ from_stream_id: fromId, to_stream_id: toId }),
         });
       }
     } catch (e) {
@@ -186,7 +197,7 @@ export default function Dashboard() {
           streams={streams}
           onDragStart={handleDragStart}
           onNewPlugin={() => { setTab("plugins"); setShowEditor(true); }}
-          onDeployPlugin={handleDeployPlugin}
+          onDeployPlugin={handleAddPluginToCanvas}
           showEditor={showEditor}
           setShowEditor={setShowEditor}
         />
