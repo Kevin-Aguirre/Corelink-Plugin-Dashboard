@@ -120,8 +120,8 @@ export default function Dashboard() {
         // Update the plugin node on canvas with new stream_id
         const newPluginId = data.plugin.stream_id;
         setNodes(prev => prev.map(n =>
-          n.data.type === "plugin"
-            ? { ...n, data: { ...n.data, stream_id: newPluginId, name: `plugin ${newPluginId}` } }
+          n.data.type === "plugin" && n.data.pluginKey === name
+            ? { ...n, data: { ...n.data, stream_id: newPluginId } }
             : n
         ));
 

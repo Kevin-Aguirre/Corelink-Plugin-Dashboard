@@ -81,7 +81,7 @@ export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDepl
     return (
       <div style={sidebarStyle}>
         {resizeHandle}
-        <PluginEditor onBack={() => { setShowEditor(false); onEditPlugin?.(null); }} onDeploy={onDeployPlugin} editPlugin={editPlugin} serverHost={serverHost} authHeaders={authHeaders} />
+        <PluginEditor onBack={() => setShowEditor(false)} onDeploy={onDeployPlugin} editPlugin={editPlugin} serverHost={serverHost} authHeaders={authHeaders} />
       </div>
     );
   }
