@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "reactflow/dist/style.css";
 import { COLORS } from "../constants";
 
@@ -48,6 +48,24 @@ public static async Task<byte[]> ProcessAsync(byte[] data, dynamic header) {
 `,
 };
 
+const TEMPLATES = [
+  { name: "Blank", code: {} },
+  {
+    name: "Uppercase",
+    code: {
+      python: `async def process(data_bytes: bytes, header: dict) -> str:
+    word = data_bytes.decode('utf-8')
+    return word.upper()
+`,
+      javascript: `async function process(data, header) {
+    const word = data.toString('utf-8');
+    return Buffer.from(word.toUpperCase(), 'utf-8');
+}
+`,
+    },
+  },
+];
+
 const LANGUAGE_LABELS = {
   python:     "Python",
   javascript: "JavaScript",
@@ -55,17 +73,46 @@ const LANGUAGE_LABELS = {
   csharp:     "C#",
 };
 
-const DOCKER_REQUIRED = new Set(["cpp", "csharp"]);
-
-export function PluginEditor({ onBack, onDeploy }) {
+export function PluginEditor({ onBack, onDeploy, editPlugin, serverHost, authHeaders }) {
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState(BOILERPLATE.python);
   const [deploying, setDeploying] = useState(false);
   const [pluginName, setPluginName] = useState(`plugin_${Date.now()}`);
+  const isEditing = !!editPlugin;
+
+  // Load source code when editing an existing plugin
+  useEffect(() => {
+    if (!editPlugin) return;
+    setPluginName(editPlugin);
+    const fetchSource = async () => {
+      try {
+        const res = await fetch(
+          `${serverHost}/api/plugin/${encodeURIComponent(editPlugin)}/source`,
+          { headers: authHeaders() }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setCode(data.code || "");
+          setLanguage(data.language || "python");
+        }
+      } catch (e) {}
+    };
+    fetchSource();
+  }, [editPlugin]);
 
   const handleLanguageChange = (lang) => {
     setLanguage(lang);
-    setCode(BOILERPLATE[lang]);
+    if (!isEditing) setCode(BOILERPLATE[lang]);
+  };
+
+  const handleTemplateChange = (templateName) => {
+    const template = TEMPLATES.find(t => t.name === templateName);
+    if (!template) return;
+    if (template.code[language]) {
+      setCode(template.code[language]);
+    } else {
+      setCode(BOILERPLATE[language]);
+    }
   };
 
   const handleDeploy = async () => {
@@ -73,8 +120,6 @@ export function PluginEditor({ onBack, onDeploy }) {
     await onDeploy(code, pluginName, language);
     setDeploying(false);
   };
-
-  const dockerRequired = DOCKER_REQUIRED.has(language);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -89,32 +134,53 @@ export function PluginEditor({ onBack, onDeploy }) {
           ← plugins
         </button>
 
-        {/* Language dropdown */}
-        <select
-          value={language}
-          onChange={e => handleLanguageChange(e.target.value)}
-          style={{
-            background: COLORS.surface, border: `0.5px solid ${COLORS.border}`,
-            borderRadius: "6px", color: COLORS.textMuted, fontSize: "11px",
-            fontFamily: "'IBM Plex Mono', monospace", padding: "4px 8px", cursor: "pointer",
-          }}
-        >
-          {Object.entries(LANGUAGE_LABELS).map(([val, label]) => (
-            <option key={val} value={val}>{label}</option>
-          ))}
-        </select>
+        <div style={{ display: "flex", gap: "6px" }}>
+          {/* Template picker */}
+          {!isEditing && (
+            <select
+              onChange={e => handleTemplateChange(e.target.value)}
+              defaultValue=""
+              style={{
+                background: COLORS.surface, border: `0.5px solid ${COLORS.border}`,
+                borderRadius: "6px", color: COLORS.textMuted, fontSize: "11px",
+                fontFamily: "'IBM Plex Mono', monospace", padding: "4px 8px", cursor: "pointer",
+              }}
+            >
+              <option value="" disabled>template</option>
+              {TEMPLATES.map(t => (
+                <option key={t.name} value={t.name}>{t.name}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Language dropdown */}
+          <select
+            value={language}
+            onChange={e => handleLanguageChange(e.target.value)}
+            style={{
+              background: COLORS.surface, border: `0.5px solid ${COLORS.border}`,
+              borderRadius: "6px", color: COLORS.textMuted, fontSize: "11px",
+              fontFamily: "'IBM Plex Mono', monospace", padding: "4px 8px", cursor: "pointer",
+            }}
+          >
+            {Object.entries(LANGUAGE_LABELS).map(([val, label]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div style={{
         fontSize: "11px", color: COLORS.textMuted,
         fontFamily: "'IBM Plex Mono', monospace", marginBottom: "8px",
       }}>
-        NEW PLUGIN
+        {isEditing ? "EDIT PLUGIN" : "NEW PLUGIN"}
       </div>
 
       <input
         value={pluginName}
         onChange={e => setPluginName(e.target.value)}
+        disabled={isEditing}
         placeholder="plugin name"
         style={{
           width: "100%", height: "34px", marginBottom: "8px",
@@ -122,7 +188,7 @@ export function PluginEditor({ onBack, onDeploy }) {
           fontFamily: "'IBM Plex Mono', monospace",
           background: COLORS.surface,
           border: `0.5px solid ${COLORS.border}`,
-          borderRadius: "8px", color: COLORS.text, outline: "none",
+          borderRadius: "8px", color: isEditing ? COLORS.textMuted : COLORS.text, outline: "none",
           boxSizing: "border-box",
         }}
       />
@@ -147,24 +213,6 @@ export function PluginEditor({ onBack, onDeploy }) {
         }}
       />
 
-      {/* Docker notice for C++ / C# */}
-      {dockerRequired && (
-        <div style={{
-          fontSize: "10px", color: COLORS.textMuted,
-          fontFamily: "'IBM Plex Mono', monospace",
-          marginBottom: "8px", lineHeight: 1.5,
-          padding: "6px 10px",
-          border: `0.5px solid ${COLORS.border}`,
-          borderRadius: "6px",
-        }}>
-          {language === "cpp" ? "C++" : "C#"} plugins run in Docker.
-          Build the image first:<br />
-          <span style={{ color: COLORS.accent }}>
-            cd plugin-runner/clients/{language === "cpp" ? "cpp" : "csharp"} &amp;&amp; docker build -t corelink-plugin-{language === "cpp" ? "cpp" : "csharp"}:latest .
-          </span>
-        </div>
-      )}
-
       <button
         onClick={handleDeploy}
         disabled={deploying}
@@ -178,7 +226,7 @@ export function PluginEditor({ onBack, onDeploy }) {
           cursor: deploying ? "not-allowed" : "pointer",
         }}
       >
-        {deploying ? "deploying..." : `deploy ${LANGUAGE_LABELS[language].toLowerCase()} plugin`}
+        {deploying ? "deploying..." : isEditing ? "redeploy plugin" : `deploy ${LANGUAGE_LABELS[language].toLowerCase()} plugin`}
       </button>
     </div>
   );

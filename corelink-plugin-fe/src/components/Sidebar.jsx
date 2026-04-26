@@ -4,9 +4,9 @@ import { SidebarItem } from "../components/SidebarItem";
 import { PluginEditor } from "../components/PluginEditor";
 import { COLORS } from "../constants";
 
-export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDeployPlugin, showEditor, setShowEditor }) {
-  const [width, setWidth] = useState(260);
-  const widthRef = useRef(260);
+export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDeployPlugin, showEditor, setShowEditor, onRename, onDeletePlugin, onViewLogs, onEditPlugin, editPlugin, serverHost, authHeaders }) {
+  const [width, setWidth] = useState(520);
+  const widthRef = useRef(520);
   const draggingRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -81,7 +81,7 @@ export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDepl
     return (
       <div style={sidebarStyle}>
         {resizeHandle}
-        <PluginEditor onBack={() => setShowEditor(false)} onDeploy={onDeployPlugin} />
+        <PluginEditor onBack={() => { setShowEditor(false); onEditPlugin?.(null); }} onDeploy={onDeployPlugin} editPlugin={editPlugin} serverHost={serverHost} authHeaders={authHeaders} />
       </div>
     );
   }
@@ -136,7 +136,7 @@ export function Sidebar({ tab, setTab, streams, onDragStart, onNewPlugin, onDepl
           </div>
         ) : (
           filtered[tab].map(item => (
-            <SidebarItem key={item.stream_id} item={item} onDragStart={onDragStart} />
+            <SidebarItem key={item.stream_id} item={item} onDragStart={onDragStart} onRename={onRename} onDeletePlugin={onDeletePlugin} onViewLogs={onViewLogs} onEditPlugin={onEditPlugin} />
           ))
         )}
       </div>

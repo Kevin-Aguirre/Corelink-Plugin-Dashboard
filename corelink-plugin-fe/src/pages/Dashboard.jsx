@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import ReactFlow, {
   addEdge,
   Background,
@@ -11,29 +12,44 @@ import { getServerHost, COLORS } from "../constants"
 import { CorelinkNode } from "../components/CorelinkNode"
 import { Sidebar } from "../components/Sidebar"
 import { Topbar } from '../components/Topbar'
+import { LogPanel } from '../components/LogPanel'
 
 const nodeTypes = { corelink: CorelinkNode };
 let nodeIdCounter = 0;
 
+
+function authHeaders() {
+  const token = sessionStorage.getItem("cl_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+  };
+}
+
 export default function Dashboard() {
   const SERVER_HOST = getServerHost();
+  const navigate = useNavigate();
   const [tab, setTab] = useState("senders");
   const [showEditor, setShowEditor] = useState(false);
   const [streams, setStreams] = useState([]);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [deploying, setDeploying] = useState(false);
+  const [logPlugin, setLogPlugin] = useState(null);
+  const [editingPlugin, setEditingPlugin] = useState(null);
 
   useEffect(() => {
     const fetch_ = async () => {
       try {
-        const res = await fetch(`${SERVER_HOST}/api/streams`);
+        const res = await fetch(`${SERVER_HOST}/api/streams`, { headers: authHeaders() });
+        if (res.status === 401) { sessionStorage.clear(); navigate("/login"); return; }
         const data = await res.json();
         const list = Object.entries(data).map(([id, info]) => ({
-          stream_id: parseInt(id),
-          name: `${info.role} ${id}`,
-          role: info.role,
           ...info,
+          stream_id: parseInt(id),
+          name: info.displayName || info.meta || info.name || `${info.role} ${id}`,
+          pluginKey: info.name || null,
+          role: info.role,
         }));
         if (list.length > 0) setStreams(list);
       } catch (e) {}
@@ -60,7 +76,7 @@ export default function Dashboard() {
       id: `node-${++nodeIdCounter}`,
       type: "corelink",
       position,
-      data: { name: item.name, type: item.role, stream_id: item.stream_id },
+      data: { name: item.name, type: item.role, stream_id: item.stream_id, pluginKey: item.pluginKey },
     }]);
   }, [nodes, setNodes]);  // ← remove nodes from deps too
 
@@ -86,7 +102,7 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${SERVER_HOST}/api/plugin`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ code, name, language }),
       });
 
@@ -97,6 +113,7 @@ export default function Dashboard() {
         for (const rn of receiverNodes) {
           await fetch(`${SERVER_HOST}/api/reset-connections/${rn.data.stream_id}`, {
             method: "POST",
+            headers: authHeaders(),
           });
         }
 
@@ -109,6 +126,7 @@ export default function Dashboard() {
         ));
 
         setShowEditor(false);
+        setEditingPlugin(null);
         setTab("plugins");
       } else {
         alert(data.error || "Deploy failed");
@@ -116,6 +134,40 @@ export default function Dashboard() {
     } catch (e) {
       alert("Could not reach backend");
     }
+  };
+
+  const handleRename = async (streamId, newName) => {
+    try {
+      await fetch(`${SERVER_HOST}/api/rename`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ stream_id: streamId, displayName: newName }),
+      });
+      setStreams(prev => prev.map(s =>
+        s.stream_id === streamId ? { ...s, name: newName || `${s.role} ${streamId}` } : s
+      ));
+      setNodes(prev => prev.map(n =>
+        n.data.stream_id === streamId ? { ...n, data: { ...n.data, name: newName || `${n.data.type} ${streamId}` } } : n
+      ));
+    } catch (e) {}
+  };
+
+  const handleDeletePlugin = async (pluginKey) => {
+    try {
+      const res = await fetch(`${SERVER_HOST}/api/plugin/${encodeURIComponent(pluginKey)}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        setStreams(prev => prev.filter(s => s.pluginKey !== pluginKey));
+        setNodes(prev => {
+          const removedIds = new Set(prev.filter(n => n.data.pluginKey === pluginKey).map(n => n.id));
+          setEdges(prevEdges => prevEdges.filter(e => !removedIds.has(e.source) && !removedIds.has(e.target)));
+          return prev.filter(n => n.data.pluginKey !== pluginKey);
+        });
+        if (logPlugin === pluginKey) setLogPlugin(null);
+      }
+    } catch (e) {}
   };
 
   const handleDeploy = async () => {
@@ -127,7 +179,7 @@ export default function Dashboard() {
         if (!fromNode || !toNode) continue;
         await fetch(`${SERVER_HOST}/api/connect`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(),
           body: JSON.stringify({
             from_stream_id: fromNode.data.stream_id,
             to_stream_id: toNode.data.stream_id,
@@ -185,12 +237,28 @@ export default function Dashboard() {
           setTab={setTab}
           streams={streams}
           onDragStart={handleDragStart}
-          onNewPlugin={() => { setTab("plugins"); setShowEditor(true); }}
+          onNewPlugin={() => { setEditingPlugin(null); setTab("plugins"); setShowEditor(true); }}
           onDeployPlugin={handleDeployPlugin}
           showEditor={showEditor}
           setShowEditor={setShowEditor}
+          onRename={handleRename}
+          onDeletePlugin={handleDeletePlugin}
+          onViewLogs={setLogPlugin}
+          onEditPlugin={(pluginKey) => { setEditingPlugin(pluginKey); setShowEditor(true); setTab("plugins"); }}
+          editPlugin={editingPlugin}
+          serverHost={SERVER_HOST}
+          authHeaders={authHeaders}
         />
       </div>
+
+      {logPlugin && (
+        <LogPanel
+          pluginName={logPlugin}
+          serverHost={SERVER_HOST}
+          authHeaders={authHeaders}
+          onClose={() => setLogPlugin(null)}
+        />
+      )}
     </div>
   );
 }
