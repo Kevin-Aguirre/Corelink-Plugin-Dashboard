@@ -28,7 +28,7 @@ async def main():
     await corelink.set_server_callback(on_subscriber, 'subscriber')
     await corelink.set_server_callback(on_dropped,    'dropped')
 
-    sender_id = await corelink.create_sender("Holodeck", "udp", data_type="testing")
+    sender_id = await corelink.create_sender("Holodeck", "udp", data_type="testing", metadata="My Sender")
     print(f"Sender ready. ID: {sender_id}")
 
     words = ['hello', 'corelink', 'world']

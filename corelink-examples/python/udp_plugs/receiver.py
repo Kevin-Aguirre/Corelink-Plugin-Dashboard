@@ -66,6 +66,7 @@ async def main():
         workspace="Holodeck",
         protocol="udp",
         data_type="",
+        metadata="My Receiver",
         alert=False,
         echo=False,
         subscribe=False,
